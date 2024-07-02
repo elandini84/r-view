@@ -21,6 +21,7 @@ class ImageAnalyzer(SkellAnalyzer):
         self.answerPortName = "/image-analyzer/answer:o"
         self.prompt = None
         self.rgb = None
+        self.imageSizes = {"width": 640, "height": 480}
 
     def configure(self, rf: Any):
         prompt_context = None
@@ -33,11 +34,10 @@ class ImageAnalyzer(SkellAnalyzer):
             self.answerPortName = "/{0}/answer:o".format(rf.find("port-prefix").asString())
         self.imagePort = BufferedPortImageRgb()
 
-        self.in_buf_human_array = np.ones((480, 640, 3), dtype=np.uint8)
-        self.in_buf_human_image = ImageRgb()
-        self.in_buf_human_image.resize(640, 480)
-        self.in_buf_human_image.setExternal(self.in_buf_human_array.data, self.in_buf_human_array.shape[1], self.in_buf_human_array.shape[0])
-        self.rgb = np.ones((480, 640, 3), dtype=np.uint8)
+        if rf.check("image-width"):
+            self.imageSizes["width"] = rf.find("image-width").asInt32()
+        if rf.check("image-height"):
+            self.imageSizes["height"] = rf.find("image-height").asInt32()
 
         self.questionPort = BufferedPortBottle()
         self.answerPort = BufferedPortBottle()
@@ -45,6 +45,7 @@ class ImageAnalyzer(SkellAnalyzer):
             Log.error("ImageAnalyzer", "Failed to open port")
             return False
         # self.imagePort.useCallback(self.rgbGetter)
+        self.prepareInnerImage()
         if not self.questionPort.open(self.questionPortName):
             Log.error("ImageAnalyzer", "Failed to open port")
             return False
@@ -85,20 +86,39 @@ class ImageAnalyzer(SkellAnalyzer):
 
         return True
 
+
+    def prepareInnerImage(self):
+        self.in_buf_human_array = np.ones((self.imageSizes["height"], self.imageSizes["width"], 3), dtype=np.uint8)
+        self.in_buf_human_image = ImageRgb()
+        self.in_buf_human_image.resize(self.imageSizes["width"], self.imageSizes["height"])
+        self.in_buf_human_image.setExternal(self.in_buf_human_array.data, self.in_buf_human_array.shape[1], self.in_buf_human_array.shape[0])
+        self.rgb = np.ones((self.imageSizes["height"], self.imageSizes["width"], 3), dtype=np.uint8)
+
+
     def manageQuestion(self, question):
-        print("\n\nthe questioooon: {0}\n\n".format(question))
+        print("Got question: {0}".format(question))
         image = self.imagePort.read()
+        if image is None:
+            plainResp = ollama.chat(
+                model = self.model,
+                messages = [self.prompt,{
+                "role": "user",
+                "content": question
+            }])
+            out = self.answerPort.prepare()
+            out.addString(plainResp["message"]["content"])
+            self.answerPort.write()
+            return
+        if image.width() != self.imageSizes["width"] or image.height() != self.imageSizes["height"]:
+            self.imageSizes["width"] = image.width()
+            self.imageSizes["height"] = image.height()
+            self.prepareInnerImage()
         self.in_buf_human_image.copy(image)
         human_image = np.copy(self.in_buf_human_array)
         self.rgb = np.copy(human_image)
-        # self.rgb = cv2.imread("/mnt/c/ExchangeData/place_red_36dp.png")
-        print("image read {0}".format(type(self.rgb)))
         _, im_arr = cv2.imencode('.jpg', self.rgb)
-        print("image encoded")
         im_bytes = im_arr.tobytes()
-        print("image tobytes")
         rgb_enc = base64.b64encode(im_bytes)
-        print("\n\nthe rgb: {0}\n\n".format(type(rgb_enc)))
         seen_response = ollama.chat(
             model = self.model,
             messages = [self.prompt,{
@@ -106,15 +126,17 @@ class ImageAnalyzer(SkellAnalyzer):
             "content": question,
             "images": [rgb_enc] #base64 encoded
             }])
-        print("Misticanza "+seen_response["message"]["content"])
+        print("Output "+seen_response["message"]["content"])
         if seen_response is not None:
             seen_text = seen_response["message"]["content"]
             out = self.answerPort.prepare()
             out.addString(seen_text)
             self.answerPort.write()
 
+
     def updateModule(self):
         return True
+
 
     def close(self):
         self.imagePort.close()
