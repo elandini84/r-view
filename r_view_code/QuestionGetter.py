@@ -12,7 +12,6 @@ class QuestionGetter(BottleCallback):
         self.analyzer = skelAnalyzer
 
     def onRead(self, bottle: Bottle, reader: TypedReaderBottle):
-        print("\n\nReading stuff: {0}\n\n".format(bottle.get(0).asString()))
         with self.mutex:
             self.bottle = bottle
             self.analyzer.manageQuestion(bottle.get(0).asString())

@@ -13,15 +13,38 @@ from .RgbGetter import RgbGetter, ImageRgb
 from .SkelAnalyzer import SkellAnalyzer
 from .QuestionGetter import QuestionGetter
 
+class LogStyle:
+    HEADER = '\033[95m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+    COLORS = {"WARNING":'\033[93m',
+              "ERROR":'\033[91m',
+              "COMPONENT":'\033[96m',
+              "DEBUG":'\033[92m',
+              "INFO":'\033[94m'}
+
+
 class ImageAnalyzer(SkellAnalyzer):
     def __init__(self):
         super().__init__()
         self.imagePortName = "/image-analyzer/img:i"
         self.questionPortName = "/image-analyzer/question:i"
         self.answerPortName = "/image-analyzer/answer:o"
-        self.prompt = None
+        self.prompt = {"role": "system","content":"You are the robot R1. You have a camera over your head and you can describe what your camera is seeing to the user"}
         self.rgb = None
         self.imageSizes = {"width": 640, "height": 480}
+
+    
+    def logMe(self, level:str, message:str):
+        styled = LogStyle()
+        comp = "COMPONENT"
+        if level.upper() in styled.COLORS.keys():
+            print(f"[{styled.BOLD}{styled.COLORS[level.upper()]}{level.upper()}{styled.ENDC}] " + f"|{styled.BOLD}{styled.COLORS[comp]}r_view_code.ImageAnalizer{styled.ENDC}| " + message)
+        else:
+            print("[{0}] [{1}] {2}".format(level.upper(),"r_view_code.ImageAnalizer",message))
+
 
     def configure(self, rf: Any):
         prompt_context = None
@@ -42,26 +65,26 @@ class ImageAnalyzer(SkellAnalyzer):
         self.questionPort = BufferedPortBottle()
         self.answerPort = BufferedPortBottle()
         if not self.imagePort.open(self.imagePortName):
-            Log.error("ImageAnalyzer", "Failed to open port")
+            self.logMe("error", "Failed to open port")
             return False
         # self.imagePort.useCallback(self.rgbGetter)
         self.prepareInnerImage()
         if not self.questionPort.open(self.questionPortName):
-            Log.error("ImageAnalyzer", "Failed to open port")
+            self.logMe("error", "Failed to open port")
             return False
         self.questionPort.useCallback(self.questionGetter)
         if not self.answerPort.open(self.answerPortName):
-            Log.error("ImageAnalyzer", "Failed to open port")
+            self.logMe("error", "Failed to open port")
             return False
         if not rf.check("model"):
-            Log.error("ImageAnalyzer", "model not found")
+            self.logMe("error", "model not found")
             return False
         self.model = rf.find("model").asString()
         if rf.check("prompt_context"):
             prompt_context = rf.find("prompt_context").asString()
         if rf.check("prompt_file"):
             prompt_file = rf.find("prompt_file").asString()
-        print("before prompt")
+        self.logMe("debug","before prompt")
         if prompt_file is not None:
             promptFinder = ResourceFinder()
             if prompt_context is not None:
@@ -72,17 +95,17 @@ class ImageAnalyzer(SkellAnalyzer):
                     promptText = file.read()
                     self.prompt = {"role": "system","content": promptText}
             except FileNotFoundError:
-                Log.error("ImageAnalyzer", "Prompt file not found")
+                self.logMe("error", "Prompt file not found")
                 return False
             except Exception as e:
-                Log.error("ImageAnalyzer", str(e))
+                self.logMe("error", str(e))
                 return False
         ollama.chat(
             model = self.model,
             messages = [self.prompt]
         )
 
-        print("Configured")
+        self.logMe("debug","Configured")
 
         return True
 
@@ -96,7 +119,7 @@ class ImageAnalyzer(SkellAnalyzer):
 
 
     def manageQuestion(self, question):
-        print("Got question: {0}".format(question))
+        self.logMe("info","Got question: {0}".format(question))
         image = self.imagePort.read()
         if image is None:
             plainResp = ollama.chat(
@@ -126,10 +149,11 @@ class ImageAnalyzer(SkellAnalyzer):
             "content": question,
             "images": [rgb_enc] #base64 encoded
             }])
-        print("Output "+seen_response["message"]["content"])
+        self.logMe("info","Output "+seen_response["message"]["content"])
         if seen_response is not None:
             seen_text = seen_response["message"]["content"]
             out = self.answerPort.prepare()
+            out.clear()
             out.addString(seen_text)
             self.answerPort.write()
 
