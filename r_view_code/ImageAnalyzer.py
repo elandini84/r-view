@@ -36,7 +36,7 @@ class ImageAnalyzer(SkellAnalyzer):
         self.rgb = None
         self.imageSizes = {"width": 640, "height": 480}
 
-    
+
     def logMe(self, level:str, message:str):
         styled = LogStyle()
         comp = "COMPONENT"
@@ -138,10 +138,11 @@ class ImageAnalyzer(SkellAnalyzer):
             self.prepareInnerImage()
         self.in_buf_human_image.copy(image)
         human_image = np.copy(self.in_buf_human_array)
-        self.rgb = np.copy(human_image)
+        self.rgb = np.copy(human_image[:,:,::-1])
         _, im_arr = cv2.imencode('.jpg', self.rgb)
         im_bytes = im_arr.tobytes()
         rgb_enc = base64.b64encode(im_bytes)
+
         seen_response = ollama.chat(
             model = self.model,
             messages = [self.prompt,{
